@@ -319,7 +319,7 @@ public abstract class AbstractBootstrap<B extends AbstractBootstrap<B, C>, C ext
     final ChannelFuture initAndRegister() {
         Channel channel = null;
         try {
-            //创建channel
+            //创建调用bootStrap(channel)时设置的channel class 创建对应的实例
             channel = channelFactory.newChannel();
             //对于 Bootstrap 和 ServerBootstrap，这里面有些不一样
             init(channel);

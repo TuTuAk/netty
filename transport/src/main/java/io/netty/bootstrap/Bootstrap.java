@@ -152,6 +152,7 @@ public class Bootstrap extends AbstractBootstrap<Bootstrap, Channel> {
      * @see #connect()
      */
     private ChannelFuture doResolveAndConnect(final SocketAddress remoteAddress, final SocketAddress localAddress) {
+        // 这里会调用initAndRegister  然后创建Selctor
         final ChannelFuture regFuture = initAndRegister();
         final Channel channel = regFuture.channel();
 

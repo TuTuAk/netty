@@ -96,6 +96,7 @@ public class NioSocketChannel extends AbstractNioByteChannel implements io.netty
     }
 
     /**
+     * 注册感兴趣的OP_READ事件到e'poll实例
      * Create a new instance
      *
      * @param parent    the {@link Channel} which created this instance or {@code null} if it was created by the user

@@ -55,6 +55,9 @@ import java.util.concurrent.ThreadFactory;
 public class NioEventLoopGroup extends MultithreadEventLoopGroup {
 
     /**
+     * 使用默认线程数、默认线程工厂和SelectorProvider(由SelectorProvider.provider()返回的SelectorProvider
+     * 创建一个新实例。注意里面创建NioEventLoop时 会创建Selector
+     *
      * Create a new instance using the default number of threads, the default {@link ThreadFactory} and
      * the {@link SelectorProvider} which is returned by {@link SelectorProvider#provider()}.
      */
