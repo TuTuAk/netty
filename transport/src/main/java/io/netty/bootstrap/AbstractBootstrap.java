@@ -101,11 +101,16 @@ public abstract class AbstractBootstrap<B extends AbstractBootstrap<B, C>, C ext
     }
 
     /**
+     * channelClass用于创建Channel实例,例如NioServerSocketChannel。
+     * 如果指定的Channel实现没有无参数构造函数，
+     * 那么使用this或channelFactory(io.net .Channel . channelFactory)。
      * The {@link Class} which is used to create {@link Channel} instances from.
      * You either use this or {@link #channelFactory(io.netty.channel.ChannelFactory)} if your
      * {@link Channel} implementation has no no-args constructor.
      */
     public B channel(Class<? extends C> channelClass) {
+        // 这个方法只是设置了 channelFactory 为 ReflectiveChannelFactory 的一个实例
+        // new ReflectiveChannelFactory(class) 里面会使用class 构造出对应的constructor 后面会使用其进行实例化
         return channelFactory(new ReflectiveChannelFactory<C>(
                 ObjectUtil.checkNotNull(channelClass, "channelClass")
         ));
@@ -224,7 +229,7 @@ public abstract class AbstractBootstrap<B extends AbstractBootstrap<B, C>, C ext
      */
     public ChannelFuture register() {
         validate();
-        return initAndRegister();
+        return  initAndRegister();
     }
 
     /**
@@ -240,6 +245,8 @@ public abstract class AbstractBootstrap<B extends AbstractBootstrap<B, C>, C ext
     }
 
     /**
+     * 创建一个Channel 并绑定
+     * 注意  这里会调用 initAndRegister()
      * Create a new {@link Channel} and bind it.
      */
     public ChannelFuture bind(int inetPort) {
@@ -269,6 +276,8 @@ public abstract class AbstractBootstrap<B extends AbstractBootstrap<B, C>, C ext
     }
 
     private ChannelFuture doBind(final SocketAddress localAddress) {
+        // 创建channel 并选择一个EventLoop 进行注册绑定
+        // 所以如果服务端只监听1个端口的话，bossGroup里面只需要有一个NioEventLoop线程就行了
         final ChannelFuture regFuture = initAndRegister();
         final Channel channel = regFuture.channel();
         if (regFuture.cause() != null) {
@@ -304,10 +313,15 @@ public abstract class AbstractBootstrap<B extends AbstractBootstrap<B, C>, C ext
         }
     }
 
+    /**
+     * 服务端调用bind(port) 和客户端connect()的时候都会调用该方法
+     */
     final ChannelFuture initAndRegister() {
         Channel channel = null;
         try {
+            //创建channel
             channel = channelFactory.newChannel();
+            //对于 Bootstrap 和 ServerBootstrap，这里面有些不一样
             init(channel);
         } catch (Throwable t) {
             if (channel != null) {
@@ -320,6 +334,9 @@ public abstract class AbstractBootstrap<B extends AbstractBootstrap<B, C>, C ext
             return new DefaultChannelPromise(new FailedChannel(), GlobalEventExecutor.INSTANCE).setFailure(t);
         }
 
+        // register 非常关键，它发生在 channel 实例化以后
+        // 这一步会调用 MultiThreadEventLoopGroup 的register 然后调用next()方法 选择一个 NioEventLoop
+        // 然后将channel注册到上面
         ChannelFuture regFuture = config().group().register(channel);
         if (regFuture.cause() != null) {
             if (channel.isRegistered()) {

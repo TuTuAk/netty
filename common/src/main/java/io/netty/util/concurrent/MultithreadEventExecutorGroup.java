@@ -73,25 +73,31 @@ public abstract class MultithreadEventExecutorGroup extends AbstractEventExecuto
         }
 
         if (executor == null) {
+            // 默认创建ThreadPerTaskExecutor，会为每个调用excute方法的task创建一个线程
             executor = new ThreadPerTaskExecutor(newDefaultThreadFactory());
         }
 
+        // 创建长度为nThreads 的 EventExecutor 数组
+        // 也就是创建EventLoop数组
         children = new EventExecutor[nThreads];
 
         for (int i = 0; i < nThreads; i ++) {
             boolean success = false;
             try {
+                // 创建EventLoop 实例，每个实例持有executor引用
                 children[i] = newChild(executor, args);
                 success = true;
             } catch (Exception e) {
                 // TODO: Think about if this is a good exception type
                 throw new IllegalStateException("failed to create a child event loop", e);
             } finally {
+                // 如果有一个 child 实例化失败，那么 success 就会为 false，然后进入下面的失败处理逻辑
                 if (!success) {
+                    // 把已经成功实例化的EventLoop shutdown，shutdown 是异步操作
                     for (int j = 0; j < i; j ++) {
                         children[j].shutdownGracefully();
                     }
-
+                    // 等待这些EventLoop成功 shutdown
                     for (int j = 0; j < i; j ++) {
                         EventExecutor e = children[j];
                         try {
@@ -100,6 +106,7 @@ public abstract class MultithreadEventExecutorGroup extends AbstractEventExecuto
                             }
                         } catch (InterruptedException interrupted) {
                             // Let the caller handle the interruption.
+                            // 重新设置中断状态，交给关心的线程来处理.
                             Thread.currentThread().interrupt();
                             break;
                         }
@@ -107,9 +114,12 @@ public abstract class MultithreadEventExecutorGroup extends AbstractEventExecuto
                 }
             }
         }
-
+        // 通过之前设置的 chooserFactory 来实例化 Chooser，把EventLoop数组传进去
+        // 默认是DefaultEventExecutorChooserFactory
         chooser = chooserFactory.newChooser(children);
 
+        // 设置一个 Listener 用来监听该线程池的 termination 事件
+        // 当监听到所有线程都 terminate 以后，这个线程池就算真正的 terminate 了。
         final FutureListener<Object> terminationListener = new FutureListener<Object>() {
             @Override
             public void operationComplete(Future<Object> future) throws Exception {
@@ -118,11 +128,12 @@ public abstract class MultithreadEventExecutorGroup extends AbstractEventExecuto
                 }
             }
         };
-
+        // 给池中每一个EventLoop都设置上面的 listener，
         for (EventExecutor e: children) {
             e.terminationFuture().addListener(terminationListener);
         }
 
+        // 设置 readonlyChildren，它是只读集合
         Set<EventExecutor> childrenSet = new LinkedHashSet<EventExecutor>(children.length);
         Collections.addAll(childrenSet, children);
         readonlyChildren = Collections.unmodifiableSet(childrenSet);

@@ -32,6 +32,24 @@ import java.util.concurrent.Executor;
 import java.util.concurrent.ThreadFactory;
 
 /**
+ * NioEventLoopGroup 本质就是一个线程池
+ * NioEventLoop本质就是一个可以执行调度任务的线程
+ * +----------------------------------------------------------------------+
+ * |         NioEventLoopGroup                                            |
+ * |       +--------------------------------+                             |
+ * |       |     NioEventLoop               |                             |
+ * |       |  +-----------+                 |   .....                     |
+ * |       |  |  Thread   |                 |                             |
+ * |       |  +-----------+ +-----------+   |                             |
+ * |       |                | taskQueue |   |                             |
+ * |       |  +-----------+ +-----------+   |                             |
+ * |       |  | Selector  |                 |                             |
+ * |       |  +-----------+                 |                             |
+ * |       +--------------------------------+                             |
+ * |                                                                      |
+ * |                                                                      |
+ * +----------------------------------------------------------------------+
+ * NioEventLoopGroup 是 MultithreadEventLoopGroup的实现，用于基于NIO Selector的channel。
  * {@link MultithreadEventLoopGroup} implementations which is used for NIO {@link Selector} based {@link Channel}s.
  */
 public class NioEventLoopGroup extends MultithreadEventLoopGroup {
@@ -69,6 +87,8 @@ public class NioEventLoopGroup extends MultithreadEventLoopGroup {
     }
 
     public NioEventLoopGroup(int nThreads, Executor executor) {
+        // 调用JDK的 SelectorProvider.provider() 方法获取对应系统的SelectorProvider，
+        // 如果是linux 则会创建EpollSelectorImpl
         this(nThreads, executor, SelectorProvider.provider());
     }
 
@@ -99,10 +119,29 @@ public class NioEventLoopGroup extends MultithreadEventLoopGroup {
     public NioEventLoopGroup(int nThreads, Executor executor, EventExecutorChooserFactory chooserFactory,
                              final SelectorProvider selectorProvider,
                              final SelectStrategyFactory selectStrategyFactory) {
+        // RejectedExecutionHandlers.reject() 所以默认拒绝策略是 抛出异常
         super(nThreads, executor, chooserFactory, selectorProvider, selectStrategyFactory,
                 RejectedExecutionHandlers.reject());
     }
 
+    /**
+     * nThreads：这个最简单，就是线程池中的线程数，也就是 NioEventLoop 的实例数量。
+     *
+     * executor：我们知道，我们本身就是要构造一个线程池（Executor），
+     *    为什么这里传一个 executor 实例呢？它其实不是给线程池用的，而是给 NioEventLoop用的。
+     *
+     * chooserFactory：当我们提交一个任务到线程池的时候，线程池需要选择（choose）其中的一个线程来执行这个任务，
+     *    这个就是用来实现选择策略的。
+     *
+     * selectorProvider：这个简单，我们需要通过它来实例化 Selector，可以看到每个线程池都持有一个 selectorProvider
+     *    实例。
+     *
+     * selectStrategyFactory：这个涉及到的是线程池中线程的工作流程，在介绍 NioEventLoop 的时候会说。
+     *
+     * rejectedExecutionHandler：这个也是线程池的好朋友了，用于处理线程池中没有可用的线程来执行任务的情况。
+     *    在 Netty 中稍微有一点点不一样，这个是给 NioEventLoop 实例用的，以后我们再详细介绍。
+     *
+     */
     public NioEventLoopGroup(int nThreads, Executor executor, EventExecutorChooserFactory chooserFactory,
                              final SelectorProvider selectorProvider,
                              final SelectStrategyFactory selectStrategyFactory,

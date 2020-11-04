@@ -102,11 +102,14 @@ class EpollEventLoop extends SingleThreadEventLoop {
         FileDescriptor eventFd = null;
         FileDescriptor timerFd = null;
         try {
+            // 创建epoll 实例
             this.epollFd = epollFd = Native.newEpollCreate();
             this.eventFd = eventFd = Native.newEventFd();
             try {
                 // It is important to use EPOLLET here as we only want to get the notification once per
                 // wakeup and don't call eventfd_read(...).
+                // 这里使用EPOLLET(边缘触发 这点和JDK NIO不一样)很重要，
+                // 因为我们只想在每次唤醒时获得一次通知，而不调用eventfd_read(…)。
                 Native.epollCtlAdd(epollFd.intValue(), eventFd.intValue(), Native.EPOLLIN | Native.EPOLLET);
             } catch (IOException e) {
                 throw new IllegalStateException("Unable to add eventFd filedescriptor to epoll", e);

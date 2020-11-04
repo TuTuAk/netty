@@ -74,6 +74,8 @@ public abstract class SingleThreadEventExecutor extends AbstractScheduledEventEx
             AtomicReferenceFieldUpdater.newUpdater(
                     SingleThreadEventExecutor.class, ThreadProperties.class, "threadProperties");
 
+    // taskQueue，这个东西很重要，提交给 NioEventLoop 的任务都会进入到这个 taskQueue 中等待被执行
+    // 这个 queue 的默认容量是 16
     private final Queue<Runnable> taskQueue;
 
     private volatile Thread thread;
@@ -164,11 +166,21 @@ public abstract class SingleThreadEventExecutor extends AbstractScheduledEventEx
     protected SingleThreadEventExecutor(EventExecutorGroup parent, Executor executor,
                                         boolean addTaskWakesUp, Queue<Runnable> taskQueue,
                                         RejectedExecutionHandler rejectedHandler) {
+        // 设置parent ,也就是之前创建的(线程池) NioEventLoopGroup 实例
         super(parent);
         this.addTaskWakesUp = addTaskWakesUp;
         this.maxPendingTasks = DEFAULT_MAX_PENDING_EXECUTOR_TASKS;
+        // executor 是前面创建NioEventGroup时传进来的Executor 默认情况下是 ThreadPerTaskExecutor
+        // 其作用是开启 NioEventLoop 中的线程(Thread 实例),注意此处并没有给EventPool创建Thread 实例
+        // 真正创建Thread实例时在 channel 的 register 操作的时候
         this.executor = ThreadExecutorMap.apply(executor, this);
+        // NioEventLoop 需要负责处理 IO 事件和非 IO 事件，
+        // 通常它都在执行 selector 的 select 方法或者正在处理 selectedKeys，
+        // 如果要 submit 一个任务给它，任务就会被放到 taskQueue 中，
+        // 等它来轮询。该队列是线程安全的 LinkedBlockingQueue，默认容量为 16。
         this.taskQueue = ObjectUtil.checkNotNull(taskQueue, "taskQueue");
+        //taskQueue 的默认容量是 16，所以，如果 submit 的任务堆积了到了 16，
+        // 再往里面提交任务会触发 rejectedExecutionHandler 的执行策略
         this.rejectedExecutionHandler = ObjectUtil.checkNotNull(rejectedHandler, "rejectedHandler");
     }
 
@@ -824,9 +836,14 @@ public abstract class SingleThreadEventExecutor extends AbstractScheduledEventEx
     }
 
     private void execute(Runnable task, boolean immediate) {
+        // 判断添加任务的线程是否就是当前 EventLoop 中的线程
         boolean inEventLoop = inEventLoop();
+        // 添加任务到之前的 taskQueue 中，
+        //     如果 taskQueue 满了(默认大小 16)，默认的策略是抛出异常
         addTask(task);
         if (!inEventLoop) {
+            // 如果不是 NioEventLoop 内部线程提交的 task，
+            // 那么判断下线程是否已经启动，没有的话，就启动线程,并修改线程启动状态
             startThread();
             if (isShutdown()) {
                 boolean reject = false;

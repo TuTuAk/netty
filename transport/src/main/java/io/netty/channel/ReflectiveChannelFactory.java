@@ -38,6 +38,11 @@ public class ReflectiveChannelFactory<T extends Channel> implements ChannelFacto
         }
     }
 
+    /**
+     * 创建 NioServerSocketChannel 或者是创建NioSocketChannel
+     * 对于 NioSocketChannel，由于它充当客户端的功能，它的创建时机在 connect(…) 的时候；
+     * 对于 NioServerSocketChannel 来说，它充当服务端功能，它的创建时机在绑定端口 bind(…) 的时候。
+     */
     @Override
     public T newChannel() {
         try {

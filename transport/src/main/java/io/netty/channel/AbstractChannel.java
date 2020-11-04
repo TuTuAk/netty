@@ -462,12 +462,18 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
                 return;
             }
 
+            // 将eventLoop 实例设置给当前 channel，从此这个 channel 就是持有 eventLoop 引用
+            // 这一步很关键，因为后续该 channel 中的所有异步操作，都要提交给这个 eventLoop 来执行
             AbstractChannel.this.eventLoop = eventLoop;
 
+            // 如果发起 register 调用的线程就是 eventLoop 实例中的线程，那么直接调用 register0(promise)
+            // 当然从bind(port)进来，它不会进入到这个分支，之所以有这个分支，
+            // 是因为我们是可以 unregister，然后再 register
             if (eventLoop.inEventLoop()) {
                 register0(promise);
             } else {
                 try {
+                    // eventLoop.execute会创建thread
                     eventLoop.execute(new Runnable() {
                         @Override
                         public void run() {

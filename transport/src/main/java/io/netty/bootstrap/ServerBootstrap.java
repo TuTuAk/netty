@@ -67,6 +67,43 @@ public class ServerBootstrap extends AbstractBootstrap<ServerBootstrap, ServerCh
     }
 
     /**
+     * netty 线程模式使用
+     *   1.单线程模式 EventLoopGroup 只设置一个线程
+     *         NioEventLoopGroup group = new NioEventLoopGroup(1);
+     *         ServerBootstrap bootstrap = new ServerBootstrap();
+     *         bootstrap.group(group)
+     *                 .channel(NioServerSocketChannel.class)
+     *                 .channel(NioServerSocketChannel.class)
+     *                 .option(ChannelOption.TCP_NODELAY, true)
+     *                 .option(ChannelOption.SO_BACKLOG, 1024)
+     *                 .childHandler(new ServerHandlerInitializer());
+     *
+     *    2.多线程模式
+     *        NioEventLoopGroup eventGroup = new NioEventLoopGroup();
+     *        ServerBootstrap bootstrap = new ServerBootstrap();
+     *        bootstrap.group(eventGroup)
+     *             .channel(NioServerSocketChannel.class)
+     *             .option(ChannelOption.TCP_NODELAY, true)
+     *             .option(ChannelOption.SO_BACKLOG, 1024)
+     *             .childHandler(new ServerHandlerInitializer());
+     *
+     *     也就是 单线程和多线程模式 都是一个group, 使用一个Reactor
+     *
+     *      3.主从多线程模型: 定义一个bossGroup 即 MainReactor
+     *          和一个 workerGroup 即 SubReactor
+     *          NioEventLoopGroup bossGroup = new NioEventLoopGroup();
+     *          NioEventLoopGroup workerGroup = new NioEventLoopGroup();
+     *          ServerBootstrap bootstrap = new ServerBootstrap();
+     *          bootstrap.group(bossGroup,workerGroup)
+     *                  .channel(NioServerSocketChannel.class)
+     *                  .option(ChannelOption.TCP_NODELAY, true)
+     *                  .option(ChannelOption.SO_BACKLOG, 1024)
+     *                  .childHandler(new ServerHandlerInitializer());
+     *      bossGroup线程池最终还是只会随机选择一个线程用于处理客户端连接，
+     *      与此同时，NioServerSocetChannel绑定到bossGroup的线程中，
+     *      NioSocketChannel绑定到workGroup的线程中.
+     *
+     * 指定用于父(acceptor)和子(client)的EventLoopGroup。
      * Specify the {@link EventLoopGroup} which is used for the parent (acceptor) and the child (client).
      */
     @Override
@@ -89,14 +126,14 @@ public class ServerBootstrap extends AbstractBootstrap<ServerBootstrap, ServerCh
     }
 
     /**
-     * Allow to specify a {@link ChannelOption} which is used for the {@link Channel} instances once they get created
-     * (after the acceptor accepted the {@link Channel}). Use a value of {@code null} to remove a previous set
-     * {@link ChannelOption}.
+     * 允许在通道实例被创建之后(在acceptor接受了channel之后)指定一个ChannelOption 用于channel实例。
+     * 使用null值 则删除以前设置的ChannelOption。
      */
     public <T> ServerBootstrap childOption(ChannelOption<T> childOption, T value) {
         ObjectUtil.checkNotNull(childOption, "childOption");
         synchronized (childOptions) {
             if (value == null) {
+                // 如果childOption value设置为null 则删除之前设置的childOption
                 childOptions.remove(childOption);
             } else {
                 childOptions.put(childOption, value);
@@ -120,6 +157,7 @@ public class ServerBootstrap extends AbstractBootstrap<ServerBootstrap, ServerCh
     }
 
     /**
+     * 设置用于为channel的请求提供服务的ChannelHandler。
      * Set the {@link ChannelHandler} which is used to serve the request for the {@link Channel}'s.
      */
     public ServerBootstrap childHandler(ChannelHandler childHandler) {
@@ -151,6 +189,7 @@ public class ServerBootstrap extends AbstractBootstrap<ServerBootstrap, ServerCh
                     pipeline.addLast(handler);
                 }
 
+                // ServerBootstrapAcceptor 会处理接收到的channel 并将其转交给 workergroup进行处理
                 ch.eventLoop().execute(new Runnable() {
                     @Override
                     public void run() {
@@ -175,6 +214,9 @@ public class ServerBootstrap extends AbstractBootstrap<ServerBootstrap, ServerCh
         return this;
     }
 
+    /**
+     * bossGroup 用其处理接收到的channel
+     */
     private static class ServerBootstrapAcceptor extends ChannelInboundHandlerAdapter {
 
         private final EventLoopGroup childGroup;
@@ -204,9 +246,16 @@ public class ServerBootstrap extends AbstractBootstrap<ServerBootstrap, ServerCh
             };
         }
 
+        /**
+         * 这里很重要  会将 accept到的channel 转移到 childGroup 进行注册处理
+         * 后续的读写也由 childGroup 里面的EventLoop进行接管
+         * @param ctx
+         * @param msg
+         */
         @Override
         @SuppressWarnings("unchecked")
         public void channelRead(ChannelHandlerContext ctx, Object msg) {
+            // 此处的msg 即为接收到的 Channel
             final Channel child = (Channel) msg;
 
             child.pipeline().addLast(childHandler);
@@ -215,6 +264,7 @@ public class ServerBootstrap extends AbstractBootstrap<ServerBootstrap, ServerCh
             setAttributes(child, childAttrs);
 
             try {
+                // ServerAcceptor 收到消息后将channel 交给worker group进行处理
                 childGroup.register(child).addListener(new ChannelFutureListener() {
                     @Override
                     public void operationComplete(ChannelFuture future) throws Exception {

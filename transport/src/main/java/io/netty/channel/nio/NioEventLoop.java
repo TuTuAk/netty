@@ -50,6 +50,13 @@ import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
+ * provider：它由 NioEventLoopGroup 传进来，一个线程池有一个 selectorProvider，
+ * 用于创建 Selector 实例
+ * selector：在 Netty 中 Selector 是跟着线程池中的线程走的。
+ * selectStrategy：select 操作的策略。
+ * ioRatio：这是 IO 任务的执行时间比例，因为每个线程既有 IO 任务执行，
+ * 也有非 IO 任务需要执行，所以该参数为了保证有足够时间是给 IO 的。
+ *
  * {@link SingleThreadEventLoop} implementation which register the {@link Channel}'s to a
  * {@link Selector} and so does the multi-plexing of these in the event loop.
  *
@@ -135,10 +142,12 @@ public final class NioEventLoop extends SingleThreadEventLoop {
     NioEventLoop(NioEventLoopGroup parent, Executor executor, SelectorProvider selectorProvider,
                  SelectStrategy strategy, RejectedExecutionHandler rejectedExecutionHandler,
                  EventLoopTaskQueueFactory queueFactory) {
+        // 进入这个方法查看
         super(parent, executor, false, newTaskQueue(queueFactory), newTaskQueue(queueFactory),
                 rejectedExecutionHandler);
         this.provider = ObjectUtil.checkNotNull(selectorProvider, "selectorProvider");
         this.selectStrategy = ObjectUtil.checkNotNull(strategy, "selectStrategy");
+        // 创建selector
         final SelectorTuple selectorTuple = openSelector();
         this.selector = selectorTuple.selector;
         this.unwrappedSelector = selectorTuple.unwrappedSelector;
@@ -167,6 +176,9 @@ public final class NioEventLoop extends SingleThreadEventLoop {
         }
     }
 
+    /**
+     * 调用JDK的openSelector 方法，会创建epoll实例
+     */
     private SelectorTuple openSelector() {
         final Selector unwrappedSelector;
         try {
@@ -433,7 +445,10 @@ public final class NioEventLoop extends SingleThreadEventLoop {
 
     @Override
     protected void run() {
+
+        // 使用selectCnt  处理空轮询
         int selectCnt = 0;
+        // 开启死循环
         for (;;) {
             try {
                 int strategy;
@@ -481,6 +496,7 @@ public final class NioEventLoop extends SingleThreadEventLoop {
                 if (ioRatio == 100) {
                     try {
                         if (strategy > 0) {
+                            // 处理事件
                             processSelectedKeys();
                         }
                     } finally {
@@ -665,6 +681,11 @@ public final class NioEventLoop extends SingleThreadEventLoop {
         }
     }
 
+    /**
+     * 处理channel
+     * @param k
+     * @param ch
+     */
     private void processSelectedKey(SelectionKey k, AbstractNioChannel ch) {
         final AbstractNioChannel.NioUnsafe unsafe = ch.unsafe();
         if (!k.isValid()) {
@@ -690,26 +711,25 @@ public final class NioEventLoop extends SingleThreadEventLoop {
 
         try {
             int readyOps = k.readyOps();
-            // We first need to call finishConnect() before try to trigger a read(...) or write(...) as otherwise
-            // the NIO JDK channel implementation may throw a NotYetConnectedException.
+            // 在尝试触发read(…)或write(…)之前，我们首先需要调用finishConnect()
+            // NIO JDK通道实现可能会抛出NotYetConnectedException异常(如果没连接的话)。
             if ((readyOps & SelectionKey.OP_CONNECT) != 0) {
-                // remove OP_CONNECT as otherwise Selector.select(..) will always return without blocking
-                // See https://github.com/netty/netty/issues/924
                 int ops = k.interestOps();
+                // 删除OP_CONNECT，否则Selector.select(..)将始终不会阻塞直接返回
+                // 具体看 https://github.com/netty/netty/issues/924
                 ops &= ~SelectionKey.OP_CONNECT;
                 k.interestOps(ops);
 
                 unsafe.finishConnect();
             }
 
-            // Process OP_WRITE first as we may be able to write some queued buffers and so free memory.
+            // 先处理OP_WRITE，因为我们可以写一些 queued buffers，这样就可以释放内存。
             if ((readyOps & SelectionKey.OP_WRITE) != 0) {
-                // Call forceFlush which will also take care of clear the OP_WRITE once there is nothing left to write
+                // 调用forceFlush，它还会在没有东西可write时清除OP_WRITE
                 ch.unsafe().forceFlush();
             }
 
-            // Also check for readOps of 0 to workaround possible JDK bug which may otherwise lead
-            // to a spin loop
+            // 还要检查readOps为0，以解决可能的JDK bug，否则可能导致自旋循环
             if ((readyOps & (SelectionKey.OP_READ | SelectionKey.OP_ACCEPT)) != 0 || readyOps == 0) {
                 unsafe.read();
             }
