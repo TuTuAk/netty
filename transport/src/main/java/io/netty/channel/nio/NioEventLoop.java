@@ -469,6 +469,7 @@ public final class NioEventLoop extends SingleThreadEventLoop {
                         nextWakeupNanos.set(curDeadlineNanos);
                         try {
                             if (!hasTasks()) {
+                                // 这里 调用 Selector.select 获取 selectedKeys
                                 strategy = select(curDeadlineNanos);
                             }
                         } finally {
@@ -493,10 +494,12 @@ public final class NioEventLoop extends SingleThreadEventLoop {
                 needsToSelectAgain = false;
                 final int ioRatio = this.ioRatio;
                 boolean ranTasks;
+                // ioRatio 默认为50
                 if (ioRatio == 100) {
+                    // 如果 ioRatio 被设置为100，那么finally里面再处理TaskQueue里面的task
                     try {
                         if (strategy > 0) {
-                            // 处理事件
+                            // strategy > 0 说明有就绪的selectedKey, 那么处理事件
                             processSelectedKeys();
                         }
                     } finally {

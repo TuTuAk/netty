@@ -51,7 +51,9 @@ public final class EchoClient {
             sslCtx = null;
         }
 
-        // Configure the client.
+        // Configure the client. 一个channel 只能绑定到一个 EventLoop 这里是不是参数写1？
+        // 如果创建多个连接是不是直接设置为 连接个数n  然后然后调n次
+        //  ChannelFuture f = b.connect(HOST, PORT).sync();
         EventLoopGroup group = new NioEventLoopGroup();
         try {
             Bootstrap b = new Bootstrap();
