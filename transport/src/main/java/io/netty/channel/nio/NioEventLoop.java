@@ -67,12 +67,14 @@ public final class NioEventLoop extends SingleThreadEventLoop {
 
     private static final int CLEANUP_INTERVAL = 256; // XXX Hard-coded value, but won't need customization.
 
+    //是否禁止优化JDK原生的selector
     private static final boolean DISABLE_KEY_SET_OPTIMIZATION =
             SystemPropertyUtil.getBoolean("io.netty.noKeySetOptimization", false);
 
     private static final int MIN_PREMATURE_SELECTOR_RETURNS = 3;
     private static final int SELECTOR_AUTO_REBUILD_THRESHOLD;
 
+    //调用JDK的selector.selectNow()方法，不会阻塞，返回IO事件的数量
     private final IntSupplier selectNowSupplier = new IntSupplier() {
         @Override
         public int get() throws Exception {
@@ -116,10 +118,13 @@ public final class NioEventLoop extends SingleThreadEventLoop {
     }
 
     /**
+     * 优化后的NIO选择器
      * The NIO {@link Selector}.
      */
     private Selector selector;
+    // 原生的 JDK Selector
     private Selector unwrappedSelector;
+    //优化了Set接口，内部使用数组
     private SelectedSelectionKeySet selectedKeys;
 
     private final SelectorProvider provider;
@@ -133,8 +138,10 @@ public final class NioEventLoop extends SingleThreadEventLoop {
     //    other value T    when EL is waiting with wakeup scheduled at time T
     private final AtomicLong nextWakeupNanos = new AtomicLong(AWAKE);
 
+    //默认实现类DefaultSelectStrategy
     private final SelectStrategy selectStrategy;
 
+    // 处理io事件用时比率 默认是50 可以设置为 0-100
     private volatile int ioRatio = 50;
     private int cancelledKeys;
     private boolean needsToSelectAgain;
@@ -191,6 +198,7 @@ public final class NioEventLoop extends SingleThreadEventLoop {
             return new SelectorTuple(unwrappedSelector);
         }
 
+        // 反射获取JDK原生Selector的实现类sun.nio.ch.SelectorImpl
         Object maybeSelectorImplClass = AccessController.doPrivileged(new PrivilegedAction<Object>() {
             @Override
             public Object run() {
@@ -205,6 +213,7 @@ public final class NioEventLoop extends SingleThreadEventLoop {
             }
         });
 
+        // 不是Class类型，说明上面方法出现异常
         if (!(maybeSelectorImplClass instanceof Class) ||
             // ensure the current selector implementation is what we can instrument.
             !((Class<?>) maybeSelectorImplClass).isAssignableFrom(unwrappedSelector.getClass())) {
@@ -222,6 +231,7 @@ public final class NioEventLoop extends SingleThreadEventLoop {
             @Override
             public Object run() {
                 try {
+                    //反射获取selectedKeys成员变量，SelectorImpl默认使用HashSet<SelectionKey>
                     Field selectedKeysField = selectorImplClass.getDeclaredField("selectedKeys");
                     Field publicSelectedKeysField = selectorImplClass.getDeclaredField("publicSelectedKeys");
 
@@ -302,6 +312,8 @@ public final class NioEventLoop extends SingleThreadEventLoop {
         if (interestOps == 0) {
             throw new IllegalArgumentException("interestOps must be non-zero.");
         }
+        // 检查感兴趣的事件是否是channel能够注册的。 对于ServerSocketChannel 只能注册SelectionKey.OP_ACCEPT
+        // 而对于SocketChannel 对其OP_CONNECT、OP_READ、OP_WRITE 3个事件感兴趣 乱注册报错
         if ((interestOps & ~ch.validOps()) != 0) {
             throw new IllegalArgumentException(
                     "invalid interestOps: " + interestOps + "(validOps: " + ch.validOps() + ')');
@@ -312,6 +324,7 @@ public final class NioEventLoop extends SingleThreadEventLoop {
             throw new IllegalStateException("event loop shut down");
         }
 
+        // 把Channel注册到EventLoop中的Selector上面，必须使用EventLoop线程  至于为什么看下面英文解释
         if (inEventLoop()) {
             register0(ch, interestOps, task);
         } else {
@@ -453,6 +466,7 @@ public final class NioEventLoop extends SingleThreadEventLoop {
             try {
                 int strategy;
                 try {
+                    // 如果存在任务则以非阻塞的方式(selectNow())查询IO事件的数量，否则返回SelectStrategy.SELECT
                     strategy = selectStrategy.calculateStrategy(selectNowSupplier, hasTasks());
                     switch (strategy) {
                     case SelectStrategy.CONTINUE:
@@ -461,15 +475,20 @@ public final class NioEventLoop extends SingleThreadEventLoop {
                     case SelectStrategy.BUSY_WAIT:
                         // fall-through to SELECT since the busy-wait is not supported with NIO
 
+                    // 如果返回了SelectStrategy.SELECT说明队列里没有任务
                     case SelectStrategy.SELECT:
+                        // 查询 PriorityQueue 中最先到期的任务的时间
                         long curDeadlineNanos = nextScheduledTaskDeadlineNanos();
                         if (curDeadlineNanos == -1L) {
+                            // PriorityQueue 也没有task
                             curDeadlineNanos = NONE; // nothing on the calendar
                         }
                         nextWakeupNanos.set(curDeadlineNanos);
                         try {
+                            // 再次判断是否具有任务
                             if (!hasTasks()) {
-                                // 这里 调用 Selector.select 获取 selectedKeys
+                                // 这里 调用 Selector.select 获取 selectedKeys,
+                                // 会按照指定时间 curDeadlineNanos 进行阻塞
                                 strategy = select(curDeadlineNanos);
                             }
                         } finally {
@@ -734,6 +753,7 @@ public final class NioEventLoop extends SingleThreadEventLoop {
 
             // 还要检查readOps为0，以解决可能的JDK bug，否则可能导致自旋循环
             if ((readyOps & (SelectionKey.OP_READ | SelectionKey.OP_ACCEPT)) != 0 || readyOps == 0) {
+                // 第一次 OP_ACCEPT事件产生也走这里  然后会设置OP_READ
                 unsafe.read();
             }
         } catch (CancelledKeyException ignored) {

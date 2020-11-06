@@ -477,6 +477,7 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
                     eventLoop.execute(new Runnable() {
                         @Override
                         public void run() {
+                            // 里面会设置 OP_READ
                             register0(promise);
                         }
                     });
@@ -499,6 +500,7 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
                     return;
                 }
                 boolean firstRegistration = neverRegistered;
+                // 由子类实现 注册逻辑  将channel 注册到 EventLoop对应的Selector
                 doRegister();
                 neverRegistered = false;
                 registered = true;
